@@ -1,50 +1,74 @@
 <?php
-    require_once 'includes/header.php';
+    // ========== PROCESS FORMS FIRST (BEFORE ANY OUTPUT) ==========
+    // This prevents the "white screen" issue - process POST data before including header
+    
+    require_once 'includes/database-connection.php';
+    require_once 'includes/session.php';
     require_login($logged_in);
 
-    $uid = $_SESSION['user_id']; // logged-in user's ID — used to scope ALL queries
+    $uid = $_SESSION['user_id'];
 
-    //Delete transaction 
+    // ========== CSRF TOKEN GENERATION ==========
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+
+    // ========== HANDLE DELETE TRANSACTION ==========
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
-        $stmt = $pdo->prepare(
-            'DELETE t FROM Transactions t
-             JOIN Account a ON t.Account_ID = a.Account_ID
-             WHERE t.Transaction_ID = :id AND a.User_ID = :uid'
-        );
-        $stmt->execute([':id' => $_POST['delete_id'], ':uid' => $uid]);
-        header('Location: index.php');
-        exit;
+        
+        // Validate CSRF token before processing delete
+        if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+            $error = 'Invalid request. Please try again.';
+        } else {
+            $stmt = $pdo->prepare(
+                'DELETE t FROM Transactions t
+                 JOIN Account a ON t.Account_ID = a.Account_ID
+                 WHERE t.Transaction_ID = :id AND a.User_ID = :uid'
+            );
+            $stmt->execute([':id' => $_POST['delete_id'], ':uid' => $uid]);
+            header('Location: index.php');
+            exit;
+        }
     }
 
-    //Add transaction
+    // ========== HANDLE ADD TRANSACTION ==========
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_transaction'])) {
-        $stmt = $pdo->prepare(
-            'INSERT INTO Transactions
-                (Account_ID, Category_ID, Pay_ID, date, amount, description, transaction_type)
-             VALUES
-                (:acc, :cat, :pay, :date, :amount, :desc, :type)'
-        );
-        $stmt->execute([
-            ':acc'    => $_POST['account_id'],
-            ':cat'    => $_POST['category_id'],
-            ':pay'    => $_POST['pay_id'],
-            ':date'   => $_POST['date'],
-            ':amount' => $_POST['amount'],
-            ':desc'   => $_POST['description'],
-            ':type'   => $_POST['transaction_type'],
-        ]);
+        
+        // Validate CSRF token before processing transaction
+        if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+            $error = 'Invalid request. Please try again.';
+        } else {
+            $stmt = $pdo->prepare(
+                'INSERT INTO Transactions
+                    (Account_ID, Category_ID, Pay_ID, date, amount, description, transaction_type)
+                 VALUES
+                    (:acc, :cat, :pay, :date, :amount, :desc, :type)'
+            );
+            $stmt->execute([
+                ':acc'    => $_POST['account_id'],
+                ':cat'    => $_POST['category_id'],
+                ':pay'    => $_POST['pay_id'],
+                ':date'   => $_POST['date'],
+                ':amount' => $_POST['amount'],
+                ':desc'   => $_POST['description'],
+                ':type'   => $_POST['transaction_type'],
+            ]);
 
-        // Update account balance: Deposit adds, Withdrawal subtracts
-        $type = $_POST['transaction_type'];
-        $op   = ($type === 'Deposit') ? '+' : '-';
-        $bal  = $pdo->prepare(
-            "UPDATE Account SET Balance = Balance $op :amount WHERE Account_ID = :id"
-        );
-        $bal->execute([':amount' => $_POST['amount'], ':id' => $_POST['account_id']]);
+            // Update account balance: Deposit adds, Withdrawal subtracts
+            $type = $_POST['transaction_type'];
+            $op   = ($type === 'Deposit') ? '+' : '-';
+            $bal  = $pdo->prepare(
+                "UPDATE Account SET Balance = Balance $op :amount WHERE Account_ID = :id"
+            );
+            $bal->execute([':amount' => $_POST['amount'], ':id' => $_POST['account_id']]);
 
-        header('Location: index.php');
-        exit;
+            header('Location: index.php');
+            exit;
+        }
     }
+
+    // ========== NOW INCLUDE HEADER (AFTER ALL POST PROCESSING) ==========
+    require_once 'includes/header.php';
 
     //Filter values from URL 
     $filter_type   = $_GET['type']   ?? '';
@@ -261,6 +285,8 @@
                             <td>
                                 <form method="POST" action="index.php"
                                       onsubmit="return confirm('Delete this transaction?')">
+                                    <!-- CSRF token for delete operation -->
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                     <input type="hidden" name="delete_id"
                                            value="<?= $tx['Transaction_ID'] ?>">
                                     <button type="submit" class="x-btn">✕</button>
@@ -285,6 +311,8 @@
         <h2>New Transaction</h2>
 
         <form method="POST" action="index.php" class="modal-form">
+            <!-- CSRF token for add transaction form -->
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
             <input type="hidden" name="add_transaction" value="1">
 
             <div class="form-row">
