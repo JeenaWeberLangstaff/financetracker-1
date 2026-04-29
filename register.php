@@ -7,39 +7,51 @@
         exit;
     }
 
+    // ========== CSRF TOKEN GENERATION ==========
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+
     $error   = '';
     $success = '';
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $first  = trim($_POST['first_name']   ?? '');
-        $last   = trim($_POST['last_name']    ?? '');
-        $email  = trim($_POST['email']        ?? '');
-        $phone  = trim($_POST['phone_number'] ?? '');
-
-        // Basic validation
-        if (!$first || !$last || !$email || !$phone) {
-            $error = 'Please fill in all fields.';
+        
+        // ========== CSRF TOKEN VALIDATION ==========
+        if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+            $error = 'Invalid request. Please try again.';
         } else {
-            // Check if email already exists
-            $check = $pdo->prepare('SELECT User_ID FROM Account_Holder WHERE Email = :email');
-            $check->execute([':email' => $email]);
+            
+            $first  = trim($_POST['first_name']   ?? '');
+            $last   = trim($_POST['last_name']    ?? '');
+            $email  = trim($_POST['email']        ?? '');
+            $phone  = trim($_POST['phone_number'] ?? '');
 
-            if ($check->fetch()) {
-                $error = 'An account with that email already exists.';
+            // Basic validation
+            if (!$first || !$last || !$email || !$phone) {
+                $error = 'Please fill in all fields.';
             } else {
-                // Insert new user
-                $stmt = $pdo->prepare(
-                    'INSERT INTO Account_Holder (First_Name, Last_Name, Email, Phone_number)
-                     VALUES (:first, :last, :email, :phone)'
-                );
-                $stmt->execute([
-                    ':first' => $first,
-                    ':last'  => $last,
-                    ':email' => $email,
-                    ':phone' => $phone,
-                ]);
+                // Check if email already exists
+                $check = $pdo->prepare('SELECT User_ID FROM Account_Holder WHERE Email = :email');
+                $check->execute([':email' => $email]);
 
-                $success = 'Account created! You can now log in.';
+                if ($check->fetch()) {
+                    $error = 'An account with that email already exists.';
+                } else {
+                    // Insert new user
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO Account_Holder (First_Name, Last_Name, Email, Phone_number)
+                         VALUES (:first, :last, :email, :phone)'
+                    );
+                    $stmt->execute([
+                        ':first' => $first,
+                        ':last'  => $last,
+                        ':email' => $email,
+                        ':phone' => $phone,
+                    ]);
+
+                    $success = 'Account created! You can now log in.';
+                }
             }
         }
     }
@@ -67,6 +79,9 @@
     <?php if (!$success): ?>
     <form method="POST" action="register.php" class="login-form">
 
+        <!-- ========== CSRF TOKEN FIELD ========== -->
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+
         <div class="form-group">
             <label for="first_name">First Name:</label>
             <input type="text" id="first_name" name="first_name"
@@ -90,7 +105,7 @@
 
         <div class="form-group">
             <label for="phone_number">Phone Number:</label>
-            <input type="text" id="phone_number" name="phone_number"
+            <input type="tel" id="phone_number" name="phone_number"
                    value="<?= htmlspecialchars($_POST['phone_number'] ?? '') ?>"
                    placeholder="1234567890" required>
         </div>
